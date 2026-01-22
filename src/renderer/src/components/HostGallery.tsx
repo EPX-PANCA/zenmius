@@ -5,7 +5,7 @@ import { AddHostModal } from './AddHostModal'
 import { useState, useMemo } from 'react'
 
 export function HostGallery({ onConnect }: { onConnect: (host: any) => void }) {
-    const { hosts, isAddHostModalOpen, setAddHostModalOpen, removeHost, notify, activeTheme } = useStore()
+    const { hosts, isAddHostModalOpen, setAddHostModalOpen, activeTheme } = useStore()
     const [searchQuery, setSearchQuery] = useState('')
     const [activeGroup, setActiveGroup] = useState<string | null>(null)
     const [activeTag, setActiveTag] = useState<string | null>(null)
@@ -27,13 +27,6 @@ export function HostGallery({ onConnect }: { onConnect: (host: any) => void }) {
     const handleEdit = (host: any) => {
         setHostToEdit(host)
         setAddHostModalOpen(true)
-    }
-
-    const handleDelete = (id: string) => {
-        if (confirm('Are you sure you want to delete this host?')) {
-            removeHost(id)
-            notify('info', 'Host removed successfully')
-        }
     }
 
     return (

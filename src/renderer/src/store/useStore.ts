@@ -72,6 +72,7 @@ interface AppState {
     setAddHostModalOpen: (open: boolean) => void
     notify: (type: 'success' | 'error' | 'info', message: string) => void
     addLog: (entry: Omit<LogEntry, 'id' | 'timestamp'>) => void // New
+    receiveLog: (log: LogEntry) => void // New
     removeNotification: (id: string) => void
     updateSettings: (settings: Partial<Settings>) => Promise<void>
     updateHost: (host: Host) => Promise<void>
@@ -115,6 +116,7 @@ export const useStore = create<AppState>((set, get) => ({
         try {
             const hosts = await window.electron.ipcRenderer.invoke('db:get-hosts')
             const settings = await window.electron.ipcRenderer.invoke('db:get-settings')
+            const logs = await window.electron.ipcRenderer.invoke('db:get-logs')
 
             const loadedSettings = settings ? { ...initialSettings, ...settings } : initialSettings
 
@@ -128,6 +130,7 @@ export const useStore = create<AppState>((set, get) => ({
 
             set({
                 hosts: hosts || [],
+                logs: logs || [],
                 settings: loadedSettings,
                 activeTheme: savedTheme || defaultThemes[0]
             })
@@ -242,10 +245,30 @@ export const useStore = create<AppState>((set, get) => ({
             timestamp: new Date().toISOString(),
             ...entry
         }
+
+        // Optimistically update UI
         set((state) => {
-            // Retention Policy: Delete logs older than 30 days
-            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-            const freshLogs = state.logs.filter(l => new Date(l.timestamp) > thirtyDaysAgo)
+            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+            const freshLogs = state.logs.filter(l => new Date(l.timestamp) > sevenDaysAgo)
+            return { logs: [log, ...freshLogs].slice(0, 1000) }
+        })
+
+        // Persist to DB
+        try {
+            window.electron.ipcRenderer.invoke('db:add-log', log)
+        } catch (e) {
+            console.error('Failed to persist log:', e)
+        }
+    },
+
+    // New: Handle incoming logs from backend (broadcasts)
+    receiveLog: (log: LogEntry) => {
+        set((state) => {
+            // Deduplicate: If log with same ID exists, ignore (it was likely our own optimistic update)
+            if (state.logs.some(l => l.id === log.id)) return {}
+
+            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+            const freshLogs = state.logs.filter(l => new Date(l.timestamp) > sevenDaysAgo)
             return { logs: [log, ...freshLogs].slice(0, 1000) }
         })
     },

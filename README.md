@@ -104,9 +104,21 @@ Zenmius is built on a robust, modern stack ensuring cross-platform compatibility
    > Please change this immediately in **Settings > Security** after your first login to secure your vault.
 
 4. **Build Distribution**
+   > **Note on Cross-Compilation**: Building for Windows/macOS from Linux (or vice-versa) may fail due to native dependencies like `better-sqlite3`.
+   
+   **Option A: Local Build (Current OS)**
    ```bash
-   npm run build:linux  # or build:win, build:mac
+   npm run build:linux
    ```
+
+   **Option B: Cloud Build (All Platforms)**
+   Zenmius includes a GitHub Actions workflow to build binaries for Windows, macOS, and Linux automatically.
+   ```bash
+   # Trigger a release build by pushing a tag
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+   *Download the artifacts from the "Actions" or "Releases" tab in your GitHub repository.*
 
 ---
 

@@ -1,9 +1,18 @@
+import { useEffect } from 'react'
 import { X, CheckCircle2, AlertCircle, Info } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useStore } from '../store/useStore'
 
 export function NotificationManager() {
-    const { notifications, removeNotification } = useStore()
+    const { notifications, removeNotification, notify } = useStore()
+
+    // Listen to backend notifications
+    useEffect(() => {
+        const remove = window.electron.ipcRenderer.on('app:notification', (_, { type, message }) => {
+            notify(type, message)
+        })
+        return () => remove()
+    }, [notify])
 
     return (
         <div className="fixed top-6 right-6 z-[200] flex flex-col gap-3 pointer-events-none">
@@ -20,8 +29,8 @@ export function NotificationManager() {
             `}
                     >
                         <div className={`p-2 rounded-xl ${n.type === 'success' ? 'bg-emerald-500/10 text-emerald-500' :
-                                n.type === 'error' ? 'bg-red-500/10 text-red-500' :
-                                    'bg-indigo-500/10 text-indigo-500'
+                            n.type === 'error' ? 'bg-red-500/10 text-red-500' :
+                                'bg-indigo-500/10 text-indigo-500'
                             }`}>
                             {n.type === 'success' ? <CheckCircle2 size={18} /> :
                                 n.type === 'error' ? <AlertCircle size={18} /> :
@@ -32,7 +41,7 @@ export function NotificationManager() {
                             <p className="text-[11px] font-black uppercase tracking-widest text-slate-500 mb-0.5">
                                 {n.type === 'error' ? 'System Fault' : 'Notification'}
                             </p>
-                            <p className="text-xs font-bold text-white">{n.message}</p>
+                            <p className="text-xs font-bold text-white max-w-[250px] break-words">{n.message}</p>
                         </div>
 
                         <button

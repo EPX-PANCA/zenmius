@@ -9,7 +9,6 @@ import {
     X,
     Bell,
     LayoutGrid,
-    Link2,
     Lock,
     Code2,
     Palette,
@@ -101,6 +100,15 @@ function App() {
             }
         }
         initVault()
+
+        // Global Log Listener
+        const removeLogListener = window.electron.ipcRenderer.on('db:new-log', (_, log) => {
+            useStore.getState().receiveLog(log)
+        })
+
+        return () => {
+            removeLogListener()
+        }
     }, [activeTheme, loadData])
 
     // Auto-Lock Mechanism
@@ -343,9 +351,9 @@ function App() {
                 </nav>
 
                 <div className="flex flex-col gap-4 mt-auto">
-                    <SidebarIcon icon={<Bell size={20} />} active={sidebarTab === 'logs'} onClick={() => setSidebarTab('logs')} label="Logs" bottom />
-                    <SidebarIcon icon={<Palette size={20} />} active={sidebarTab === 'themes'} onClick={() => setSidebarTab('themes')} label="Themes" bottom />
-                    <SidebarIcon icon={<Settings size={20} />} active={sidebarTab === 'settings'} onClick={() => setSidebarTab('settings')} label="Settings" bottom />
+                    <SidebarIcon icon={<Bell size={20} />} active={sidebarTab === 'logs'} onClick={() => setSidebarTab('logs')} label="Logs" />
+                    <SidebarIcon icon={<Palette size={20} />} active={sidebarTab === 'themes'} onClick={() => setSidebarTab('themes')} label="Themes" />
+                    <SidebarIcon icon={<Settings size={20} />} active={sidebarTab === 'settings'} onClick={() => setSidebarTab('settings')} label="Settings" />
                 </div>
             </aside>
 
@@ -561,7 +569,7 @@ function App() {
     )
 }
 
-function SidebarIcon({ icon, active, onClick, label, bottom }: { icon: any, active: boolean, onClick: () => void, label: string, bottom?: boolean }) {
+function SidebarIcon({ icon, active, onClick, label }: { icon: any, active: boolean, onClick: () => void, label: string }) {
     const { activeTheme } = useStore()
     const [isHovered, setIsHovered] = useState(false)
     const [coords, setCoords] = useState({ top: 0, left: 0, height: 0 })

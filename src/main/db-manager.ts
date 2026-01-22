@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import { app, ipcMain } from 'electron'
 import { join } from 'path'
+import { randomUUID } from 'crypto'
 
 class DatabaseManager {
     private db: Database.Database | null = null
@@ -49,6 +50,16 @@ class DatabaseManager {
                 username TEXT,
                 password TEXT,
                 resolution TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS logs (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                module TEXT NOT NULL,
+                action TEXT NOT NULL,
+                message TEXT NOT NULL,
+                details TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
         `)
@@ -173,7 +184,58 @@ class DatabaseManager {
         importTx()
     }
 
+    public addLog(log: { id?: string, type: string, module: string, action: string, message: string, details?: string, created_at?: string, timestamp?: string }) {
+        if (!this.db) return
+        try {
+            const now = new Date().toISOString()
+            const logTime = log.created_at || log.timestamp || now
+
+            const dbEntry = {
+                id: log.id || randomUUID(),
+                type: log.type,
+                module: log.module,
+                action: log.action,
+                message: log.message,
+                details: log.details || null,
+                created_at: logTime
+            }
+
+            const stmt = this.db.prepare(`
+                INSERT INTO logs (id, type, module, action, message, details, created_at)
+                VALUES (@id, @type, @module, @action, @message, @details, @created_at)
+            `)
+            stmt.run(dbEntry)
+
+            // Broadcast to renderer with 'timestamp' property
+            const frontendLog = { ...dbEntry, timestamp: dbEntry.created_at }
+            import('electron').then(({ BrowserWindow }) => {
+                BrowserWindow.getAllWindows().forEach(win => {
+                    win.webContents.send('db:new-log', frontendLog)
+                })
+            })
+        } catch (e) {
+            console.error('Failed to write log:', e)
+        }
+    }
+
     private setupHandlers() {
+        ipcMain.handle('db:add-log', (_, log) => {
+            this.addLog(log)
+            return { success: true }
+        })
+
+        ipcMain.handle('db:get-logs', () => {
+            const stmt = this.db!.prepare('SELECT * FROM logs ORDER BY created_at DESC LIMIT 100')
+            const logs = stmt.all()
+            // Map created_at to timestamp for frontend
+            return logs.map((l: any) => ({ ...l, timestamp: l.created_at }))
+        })
+
+        ipcMain.handle('db:clear-logs', () => {
+            this.db!.exec('DELETE FROM logs')
+            return { success: true }
+        })
+
         ipcMain.handle('db:get-hosts', () => {
             const stmt = this.db!.prepare('SELECT * FROM hosts ORDER BY created_at DESC')
             const hosts = stmt.all()

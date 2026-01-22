@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Monitor, Server, Activity, Plus, Play, X, Search, Edit2, User, Key } from 'lucide-react'
+import { Monitor, Server, Plus, Play, X, Search, Edit2, User, Key } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useStore } from '../store/useStore'
 
@@ -128,6 +128,16 @@ export function RemoteView() {
             }
         }
 
+        if (session.protocol === 'vnc' && !finalPassword) {
+            // VNC often requires password, but some don't. Warn but allow.
+            // console.warn('Launching VNC without password')
+        }
+
+        if (session.protocol === 'rdp' && !finalPassword) {
+            notify('error', 'Password is required for RDP connections. Please edit and save the password.')
+            return
+        }
+
         try {
             const res = await window.electron.ipcRenderer.invoke('remote:launch', {
                 protocol: session.protocol,
@@ -139,7 +149,9 @@ export function RemoteView() {
             })
 
             if (!res.success) {
-                notify('error', 'Launch failed: ' + res.error)
+                notify('error', res.error || 'Launch failed (Unknown Error)')
+            } else {
+                notify('success', `${session.protocol.toUpperCase()} Session Launched!`)
             }
         } catch (error: any) {
             console.error('Failed to invoke remote:launch', error)
