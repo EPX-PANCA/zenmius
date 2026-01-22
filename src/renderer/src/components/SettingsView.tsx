@@ -253,8 +253,18 @@ export function SettingsView() {
                                 Zenmius is an advanced, open-source SSH, SFTP, VNC, and RDP client designed for the modern DevOps era. Built with Electron, React, and TypeScript.
                             </p>
                             <div className="pt-4 flex justify-center gap-4">
-                                <button className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-[10px] uppercase font-bold tracking-widest transition-all">Check for Updates</button>
-                                <button className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-[10px] uppercase font-bold tracking-widest transition-all">GitHub</button>
+                                <button
+                                    onClick={() => window.open('https://github.com/EPX-PANCA/zenmius/releases', '_blank')}
+                                    className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-[10px] uppercase font-bold tracking-widest transition-all"
+                                >
+                                    Check for Updates
+                                </button>
+                                <button
+                                    onClick={() => window.open('https://github.com/EPX-PANCA/zenmius', '_blank')}
+                                    className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-[10px] uppercase font-bold tracking-widest transition-all"
+                                >
+                                    GitHub
+                                </button>
                             </div>
                         </div>
                     </section >
