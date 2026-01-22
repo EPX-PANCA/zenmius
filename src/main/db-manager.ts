@@ -10,7 +10,18 @@ class DatabaseManager {
         const dbPath = join(app.getPath('userData'), 'zenmius.db')
         this.db = new Database(dbPath)
         this.initSchema()
+        this.cleanupOldLogs()
         this.setupHandlers()
+    }
+
+    private cleanupOldLogs() {
+        if (!this.db) return
+        try {
+            // Delete logs older than 7 days
+            this.db.exec("DELETE FROM logs WHERE created_at < datetime('now', '-7 days')")
+        } catch (e) {
+            console.error('Failed to cleanup old logs:', e)
+        }
     }
 
     private initSchema() {

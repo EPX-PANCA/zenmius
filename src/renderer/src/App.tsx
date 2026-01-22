@@ -106,8 +106,14 @@ function App() {
             useStore.getState().receiveLog(log)
         })
 
+        // Global Notification Listener
+        const removeNotificationListener = window.electron.ipcRenderer.on('app:notification', (_, { type, message }) => {
+            useStore.getState().notify(type, message)
+        })
+
         return () => {
             removeLogListener()
+            removeNotificationListener()
         }
     }, [activeTheme, loadData])
 
