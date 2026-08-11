@@ -2,11 +2,12 @@ import { ipcMain } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { app } from 'electron'
+// eslint-disable-next-line @typescript-eslint/no-var-requires
 const libsodiumRaw = require('libsodium-wrappers-sumo')
 const libsodium = libsodiumRaw.default || libsodiumRaw
 
-const VAULT_PATH = path.join(app.getPath('userData'), 'vault.json')
-const METADATA_PATH = path.join(app.getPath('userData'), 'vault_meta.json')
+const getVaultPath = () => path.join(app.getPath('userData'), 'vault.json')
+const getMetadataPath = () => path.join(app.getPath('userData'), 'vault_meta.json')
 
 class VaultManager {
     private masterKey: Uint8Array | null = null
@@ -17,7 +18,11 @@ class VaultManager {
     }
 
     public status() {
-        return { locked: this.masterKey === null }
+        const userDataPath = app.getPath('userData')
+        const hasVault = fs.existsSync(getVaultPath())
+        const hasMetadata = fs.existsSync(getMetadataPath())
+        const hasExistingProfile = fs.existsSync(path.join(userDataPath, 'zenmius.db'))
+        return { locked: this.masterKey === null, initialized: hasVault || hasMetadata || hasExistingProfile }
     }
 
     public async encryptData(data: any) {
@@ -62,7 +67,7 @@ class VaultManager {
                 ciphertext: libsodium.to_hex(encrypted)
             }
 
-            fs.writeFileSync(VAULT_PATH, JSON.stringify(payload))
+            fs.writeFileSync(getVaultPath(), JSON.stringify(payload))
             return { success: true }
         } catch (error: any) {
             return { success: false, error: 'Failed to save vault: ' + error.message }
@@ -88,34 +93,30 @@ class VaultManager {
         }
     }
 
-    private async getSalt(_password: string): Promise<Uint8Array> {
+    private async getSalt(): Promise<Uint8Array> {
         await libsodium.ready
         const SALT_BYTES = libsodium.crypto_pwhash_SALTBYTES || 16
 
-        try {
-            if (fs.existsSync(METADATA_PATH)) {
-                const raw = fs.readFileSync(METADATA_PATH, 'utf-8')
-                if (raw && raw.trim()) {
-                    const meta = JSON.parse(raw)
-                    if (meta && meta.salt && typeof meta.salt === 'string') {
-                        return libsodium.from_hex(meta.salt) as Uint8Array
-                    }
-                }
-                console.warn('[Vault] Metadata corrupted or invalid salt format.')
-            }
-        } catch (e) {
-            console.error('[Vault] Error reading metadata:', e)
+        const metadataPath = getMetadataPath()
+        if (!fs.existsSync(metadataPath)) {
+            const salt = libsodium.randombytes_buf(SALT_BYTES) as Uint8Array
+            fs.mkdirSync(path.dirname(metadataPath), { recursive: true })
+            fs.writeFileSync(metadataPath, JSON.stringify({ salt: libsodium.to_hex(salt) }))
+            return salt
         }
 
-        // Fallback: Create new salt
-        console.log('[Vault] Creating new salt')
-        const salt = libsodium.randombytes_buf(SALT_BYTES) as Uint8Array
         try {
-            fs.writeFileSync(METADATA_PATH, JSON.stringify({ salt: libsodium.to_hex(salt) }))
+            const raw = fs.readFileSync(metadataPath, 'utf-8')
+            const meta = JSON.parse(raw)
+            if (meta && typeof meta.salt === 'string') {
+                const salt = libsodium.from_hex(meta.salt) as Uint8Array
+                if (salt.length === SALT_BYTES) return salt
+            }
+            throw new Error('Vault metadata contains an invalid salt')
         } catch (e) {
-            console.error('[Vault] Failed to write metadata:', e)
+            console.error('[Vault] Error reading metadata:', e)
+            throw new Error('Vault metadata is corrupted; restore vault_meta.json from backup')
         }
-        return salt
     }
 
     private setupHandlers() {
@@ -148,7 +149,7 @@ class VaultManager {
                     this.masterKey
                 )
 
-                fs.writeFileSync(VAULT_PATH, JSON.stringify({
+                fs.writeFileSync(getVaultPath(), JSON.stringify({
                     nonce: libsodium.to_hex(nonce),
                     ciphertext: libsodium.to_hex(encrypted)
                 }))
@@ -157,6 +158,81 @@ class VaultManager {
                 return { success: true }
             } catch (e: any) {
                 console.error('[Vault] Save Error:', e)
+                return { success: false, error: e.message }
+            }
+        })
+
+        ipcMain.handle('vault:delete-credential', async (_, hostId) => {
+            console.log('[Vault] Deleting credential for host:', hostId)
+            if (!this.masterKey) {
+                console.error('[Vault] Delete failed: Vault locked')
+                return { success: false, error: 'Vault locked' }
+            }
+
+            try {
+                const current = await this.decryptVault()
+                const data = (current.success && current.data && typeof current.data === 'object' && !Array.isArray(current.data))
+                    ? current.data
+                    : { hosts: {} }
+
+                if (data.hosts && data.hosts[hostId]) {
+                    delete data.hosts[hostId]
+
+                    const NONCE_BYTES = libsodium.crypto_secretbox_NONCEBYTES || 24
+                    const nonce = libsodium.randombytes_buf(NONCE_BYTES) as Uint8Array
+                    const encrypted = libsodium.crypto_secretbox_easy(
+                        JSON.stringify(data),
+                        nonce,
+                        this.masterKey
+                    )
+
+                    fs.writeFileSync(getVaultPath(), JSON.stringify({
+                        nonce: libsodium.to_hex(nonce),
+                        ciphertext: libsodium.to_hex(encrypted)
+                    }))
+                    console.log('[Vault] Deleted credential and saved successfully')
+                }
+                return { success: true }
+            } catch (e: any) {
+                console.error('[Vault] Delete Error:', e)
+                return { success: false, error: e.message }
+            }
+        })
+
+        ipcMain.handle('vault:clone-credential', async (_, { oldId, newId }) => {
+            console.log('[Vault] Cloning credential from', oldId, 'to', newId)
+            if (!this.masterKey) {
+                console.error('[Vault] Clone failed: Vault locked')
+                return { success: false, error: 'Vault locked' }
+            }
+
+            try {
+                const current = await this.decryptVault()
+                const data = (current.success && current.data && typeof current.data === 'object' && !Array.isArray(current.data))
+                    ? current.data
+                    : { hosts: {} }
+
+                if (data.hosts && data.hosts[oldId]) {
+                    data.hosts[newId] = { ...data.hosts[oldId], updatedAt: new Date().toISOString() }
+
+                    const NONCE_BYTES = libsodium.crypto_secretbox_NONCEBYTES || 24
+                    const nonce = libsodium.randombytes_buf(NONCE_BYTES) as Uint8Array
+                    const encrypted = libsodium.crypto_secretbox_easy(
+                        JSON.stringify(data),
+                        nonce,
+                        this.masterKey
+                    )
+
+                    fs.writeFileSync(getVaultPath(), JSON.stringify({
+                        nonce: libsodium.to_hex(nonce),
+                        ciphertext: libsodium.to_hex(encrypted)
+                    }))
+                    console.log('[Vault] Cloned credential successfully')
+                    return { success: true }
+                }
+                return { success: false, error: 'Credential not found' }
+            } catch (e: any) {
+                console.error('[Vault] Clone Error:', e)
                 return { success: false, error: e.message }
             }
         })
@@ -179,7 +255,7 @@ class VaultManager {
         ipcMain.handle('vault:init', async (_, password) => {
             try {
                 await libsodium.ready
-                const salt = (await this.getSalt(password)) as Uint8Array
+                const salt = (await this.getSalt()) as Uint8Array
                 this.masterKey = libsodium.crypto_pwhash(
                     libsodium.crypto_secretbox_KEYBYTES,
                     password,
@@ -190,7 +266,7 @@ class VaultManager {
                 ) as Uint8Array
 
                 // Verify if we can decrypt existing vault if it exists
-                if (fs.existsSync(VAULT_PATH)) {
+                if (fs.existsSync(getVaultPath())) {
                     // Force ensure masterKey is set before decrypting (it is set above)
                     if (!this.masterKey) throw new Error('Master Key generation failed')
 
@@ -245,8 +321,8 @@ class VaultManager {
                     ciphertext: libsodium.to_hex(encrypted)
                 }
 
-                fs.writeFileSync(VAULT_PATH, JSON.stringify(payload))
-                fs.writeFileSync(METADATA_PATH, JSON.stringify({ salt: libsodium.to_hex(newSalt) }))
+                fs.writeFileSync(getVaultPath(), JSON.stringify(payload))
+                fs.writeFileSync(getMetadataPath(), JSON.stringify({ salt: libsodium.to_hex(newSalt) }))
 
                 // 6. Update in-memory key
                 this.masterKey = newMasterKey
@@ -274,7 +350,7 @@ class VaultManager {
                     ciphertext: libsodium.to_hex(encrypted)
                 }
 
-                fs.writeFileSync(VAULT_PATH, JSON.stringify(payload))
+                fs.writeFileSync(getVaultPath(), JSON.stringify(payload))
                 return { success: true }
             } catch (error: any) {
                 return { success: false, error: 'Failed to save vault: ' + error.message }
@@ -297,10 +373,11 @@ class VaultManager {
 
     private async decryptVault() {
         if (!this.masterKey) return { success: false, error: 'Vault locked' }
-        if (!fs.existsSync(VAULT_PATH)) return { success: true, data: [] }
+        const vaultPath = getVaultPath()
+        if (!fs.existsSync(vaultPath)) return { success: true, data: [] }
 
         try {
-            const raw = fs.readFileSync(VAULT_PATH, 'utf-8')
+            const raw = fs.readFileSync(vaultPath, 'utf-8')
             if (!raw || raw.trim() === '') return { success: true, data: [] }
 
             let payload;

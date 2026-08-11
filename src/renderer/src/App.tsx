@@ -34,6 +34,7 @@ import { useStore } from './store/useStore'
 
 interface Session {
     id: string
+    hostId: string
     title: string
     type: 'ssh' | 'rdp' | 'vnc'
     viewMode: 'terminal' | 'sftp'
@@ -44,7 +45,7 @@ interface Session {
 function App() {
     const [activeTabId, setActiveTabId] = useState<string | null>(null)
     const [sessions, setSessions] = useState<Session[]>([])
-    const [sidebarTab, setSidebarTab] = useState('dashboard')
+    const { sidebarTab, setSidebarTab } = useStore()
     const { vaultLocked, activeTheme, notify, loadData, settings, addLog } = useStore() // Added addLog
     // Password prompt state
     const [pendingHost, setPendingHost] = useState<any>(null)
@@ -81,23 +82,10 @@ function App() {
         document.documentElement.style.setProperty('--bg-sidebar', activeTheme.sidebar)
         document.documentElement.style.setProperty('--bg-accent', activeTheme.primary)
 
-        // AUTO-UNLOCK VAULT ON STARTUP
-        // This ensures seamless experience for local usage while keeping storage encrypted
+        // Keep the vault locked until the user supplies the master password.
         const initVault = async () => {
             const status = await window.electron.ipcRenderer.invoke('vault:status')
-            if (!status.initialized || status.locked) {
-                // Try default password for seamless experience
-                const res = await window.electron.ipcRenderer.invoke('vault:init', 'zendemo')
-                if (res.success) {
-                    useStore.getState().setVaultLocked(false)
-                    notify('success', 'Vault Ready & Secured')
-                } else {
-                    // Only lock if default password fails (user changed it)
-                    useStore.getState().setVaultLocked(true)
-                }
-            } else {
-                useStore.getState().setVaultLocked(false)
-            }
+            useStore.getState().setVaultLocked(Boolean(status.locked))
         }
         initVault()
 
@@ -163,6 +151,7 @@ function App() {
         })
         const newSession: Session = {
             id,
+            hostId: hostConfig.id || '',
             title: hostConfig?.name || `Session-${id.toUpperCase()}`,
             type: 'ssh',
             viewMode: 'terminal',
@@ -193,9 +182,22 @@ function App() {
     }, [sessions, addLog])
 
     const handleConnect = useCallback(async (host: any) => {
+        // Check if vault is locked first globally
+        if (useStore.getState().vaultLocked) {
+            notify('warning', 'Vault is Locked. Please enter your Master Password to proceed.')
+            setSidebarTab('vault')
+            return
+        }
+
         // Try to fetch credentials from vault
         try {
             const hasCreds = await window.electron.ipcRenderer.invoke('vault:get-credential', host.id)
+            if (!hasCreds.success && (hasCreds.error === 'Vault locked' || hasCreds.error === 'Vault must be unlocked first')) {
+                notify('warning', 'Vault is Locked. Please enter your Master Password to proceed.')
+                setSidebarTab('vault')
+                return
+            }
+
             if (hasCreds.success && hasCreds.credential) {
                 // Determine if we have a password or key
                 // (Currently we only saved password/username, we can extend this)
@@ -242,39 +244,20 @@ function App() {
                 const safePassword = String(password || '')
                 const safeUsername = String(pendingHost.username || '')
 
-                let res = await window.electron.ipcRenderer.invoke('vault:save-credential', {
+                const res = await window.electron.ipcRenderer.invoke('vault:save-credential', {
                     hostId: pendingHost.id,
                     password: safePassword,
                     username: safeUsername
                 })
 
-                // Auto-unlock retry mechanism
                 if (!res.success && (res.error === 'Vault locked' || res.error === 'Vault must be unlocked first')) {
-                    console.log('Vault locked, attempting auto-unlock with default...')
-                    const unlockRes = await window.electron.ipcRenderer.invoke('vault:init', 'zendemo') // Default password
-                    if (unlockRes.success) {
-                        useStore.getState().setVaultLocked(false)
-                        // Retry save
-                        res = await window.electron.ipcRenderer.invoke('vault:save-credential', {
-                            hostId: pendingHost.id,
-                            password: safePassword,
-                            username: safeUsername
-                        })
-                    } else {
-                        console.error('Auto-unlock failed:', unlockRes.error)
-                        // If auto-unlock failed, we can't save.
-                        // But we don't want to show generic "vault locked" if it was a crash.
-                        if (unlockRes.error && unlockRes.error.includes('length')) {
-                            res.error = 'System Fault: ' + unlockRes.error
-                        }
-                    }
+                    notify('warning', 'Host connected, but credentials were not saved. Unlock the Vault with your Master Password.')
                 }
 
                 if (res.success) {
                     notify('success', 'Credentials saved securely to Vault')
                 } else {
                     console.warn('Vault save failed:', res.error)
-                    // Suppress simple lock/unlock info, show real errors
                     if (res.error && !res.error.includes('locked') && !res.error.includes('Vault')) {
                         notify('error', 'Vault Error: ' + res.error)
                     } else if (res.error && res.error.includes('System Fault')) {
@@ -538,6 +521,7 @@ function App() {
                                         <div className={`w-full h-full ${session.viewMode === 'sftp' ? 'block' : 'hidden'}`}>
                                             <SFTPView
                                                 id={session.id}
+                                                hostId={session.hostId}
                                                 isConnected={session.isConnected}
                                                 onReconnect={() => reconnectSession(session.id)}
                                             />
@@ -562,7 +546,7 @@ function App() {
                             <HardDrive size={14} style={{ color: activeTheme.primary }} /> <span className="text-slate-500">SSD</span> {stats.storage.percent}%
                         </div>
                         <div className="flex items-center gap-2 text-[9px] opacity-60">
-                            ZENMIUS CORE v1.2.6 • {activeTheme.name.toUpperCase()}
+                            ZENMIUS CORE v1.2.8 • {activeTheme.name.toUpperCase()}
                         </div>
                     </div>
                     <div className="flex items-center gap-4">
@@ -639,7 +623,7 @@ function Tab({ active, title, sessionId, onClick, onClose }: { active: boolean, 
             </span>
             <button
                 onClick={onClose}
-                className="w-5 h-5 flex items-center justify-center hover:bg-white/10 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                className="w-5 h-5 flex items-center justify-center hover:bg-white/10 rounded-lg transition-opacity"
             >
                 <X size={12} strokeWidth={3} />
             </button>

@@ -9,9 +9,18 @@ class RemoteManager {
         ipcMain.handle('remote:launch', async (_, { protocol, host, port, username, password, resolution }) => {
             console.log(`[Remote] Launching ${protocol} session for ${host}:${port}`)
 
+            const normalizedHost = typeof host === 'string' ? host.trim() : ''
+            const normalizedPort = Number(port)
+            if (!['rdp', 'vnc'].includes(protocol) || !normalizedHost || /[\u0000-\u001f\s]/.test(normalizedHost)) {
+                return { success: false, error: 'Invalid remote protocol or host.' }
+            }
+            if (!Number.isInteger(normalizedPort) || normalizedPort < 1 || normalizedPort > 65535) {
+                return { success: false, error: 'Invalid remote port.' }
+            }
+
             const deps = await this.checkDependencies()
             if (protocol === 'rdp' && !deps.rdp) {
-                return { success: false, error: 'FreeRDP argument (xfreerdp/wfreerdp) is not found in PATH.' }
+                return { success: false, error: 'FreeRDP (xfreerdp3/xfreerdp) is not found in PATH.' }
             }
             if (protocol === 'vnc' && !deps.vnc) {
                 return { success: false, error: 'VNC Viewer is not found in PATH.' }
@@ -19,9 +28,9 @@ class RemoteManager {
 
             try {
                 if (protocol === 'rdp') {
-                    return this.launchRDP(host, port, username, password, resolution)
+                    return this.launchRDP(deps.rdp, normalizedHost, normalizedPort, username, password, resolution)
                 } else if (protocol === 'vnc') {
-                    return this.launchVNC(host, port, username, password)
+                    return this.launchVNC(deps.vnc, normalizedHost, normalizedPort, username, password)
                 }
                 return { success: false, error: 'Unsupported protocol' }
             } catch (error: any) {
@@ -31,41 +40,48 @@ class RemoteManager {
         })
     }
 
-    private getBinaryName(type: 'rdp' | 'vnc') {
-        const isWin = process.platform === 'win32'
-        if (type === 'rdp') return isWin ? 'wfreerdp' : 'xfreerdp'
-        if (type === 'vnc') return isWin ? 'vncviewer' : 'vncviewer'
-        return ''
+    private getBinaryCandidates(type: 'rdp' | 'vnc') {
+        if (type === 'rdp') {
+            return process.platform === 'win32' ? ['wfreerdp'] : ['xfreerdp3', 'xfreerdp']
+        }
+        return ['vncviewer', 'gvncviewer', 'vinagre']
+    }
+
+    private async findBinary(candidates: string[]): Promise<string | null> {
+        const checkCmd = process.platform === 'win32' ? 'where' : 'which'
+
+        for (const candidate of candidates) {
+            const found = await new Promise<string | null>(resolve => {
+                const child = spawn(checkCmd, [candidate])
+                let output = ''
+                child.stdout?.on('data', data => { output += data.toString() })
+                child.on('error', () => resolve(null))
+                child.on('close', code => resolve(code === 0 ? output.trim().split(/\r?\n/)[0] || candidate : null))
+            })
+            if (found) return found
+        }
+        return null
     }
 
     private async checkDependencies() {
-        const rdpBin = this.getBinaryName('rdp')
-        const vncBin = this.getBinaryName('vnc')
-        const checkCmd = process.platform === 'win32' ? 'where' : 'which'
+        const rdpCandidates = this.getBinaryCandidates('rdp')
+        const vncCandidates = this.getBinaryCandidates('vnc')
+        const rdp = await this.findBinary(rdpCandidates)
+        const vnc = await this.findBinary(vncCandidates)
 
-        const check = (cmd: string) => new Promise<boolean>(resolve => {
-            const child = spawn(checkCmd, [cmd])
-            child.on('close', code => resolve(code === 0))
-        })
-
-        const rdp = await check(rdpBin)
-        const vnc = await check(vncBin)
-
-        if (!rdp) console.warn(`[Remote] Warning: ${rdpBin} not found!`)
-        if (!vnc) console.warn(`[Remote] Warning: ${vncBin} not found!`)
+        if (!rdp) console.warn(`[Remote] Warning: ${rdpCandidates.join('/')} not found!`)
+        if (!vnc) console.warn(`[Remote] Warning: ${vncCandidates.join('/')} not found!`)
 
         return { rdp, vnc }
     }
 
-    private launchRDP(host: string, port: number, username?: string, password?: string, resolution?: string): Promise<{ success: boolean, error?: string }> {
+    private launchRDP(binary: string | null, host: string, port: number, username?: string, password?: string, resolution?: string): Promise<{ success: boolean, error?: string }> {
         return new Promise((resolve) => {
-            const binary = this.getBinaryName('rdp')
-            const isWin = process.platform === 'win32'
-
+            if (!binary) return resolve({ success: false, error: 'FreeRDP is not available.' })
             const args = [
                 `/v:${host}:${port}`,
                 '/title:RDP - Zenmius',
-                '/cert-ignore',
+                '/cert:tofu',
                 '+clipboard',
                 '/gdi:sw',
                 '/network:auto',
@@ -73,7 +89,7 @@ class RemoteManager {
                 '/floatbar:sticky:on,default:visible,show:always'
             ]
 
-            if (!isWin) {
+            if (process.platform === 'linux') {
                 args.push('/sound:sys:alsa', '/microphone:sys:alsa')
                 args.push('+window-drag')
                 args.push('/wm-class:Zenmius')
@@ -90,7 +106,8 @@ class RemoteManager {
             if (username) args.push(`/u:${username}`)
             if (password) args.push(`/p:${password}`)
 
-            console.log(`[Remote] Spawning ${binary} with args:`, args)
+            const safeArgs = args.map(arg => arg.startsWith('/p:') ? '/p:********' : arg)
+            console.log(`[Remote] Spawning ${binary} with args:`, safeArgs)
 
             try {
                 const child = spawn(binary, args, { detached: false, stdio: 'pipe' })
@@ -259,11 +276,13 @@ class RemoteManager {
         })
     }
 
-    private launchVNC(host: string, port: number, _username?: string, _password?: string): Promise<{ success: boolean, error?: string }> {
+    private launchVNC(binary: string | null, host: string, port: number, _username?: string, _password?: string): Promise<{ success: boolean, error?: string }> {
+        void _username
+        void _password
         return new Promise((resolve) => {
+            if (!binary) return resolve({ success: false, error: 'VNC viewer is not available.' })
             const target = `${host}:${port}`
             const args = [target]
-            const binary = this.getBinaryName('vnc')
 
             console.log(`[Remote] Spawning ${binary} for:`, target)
 

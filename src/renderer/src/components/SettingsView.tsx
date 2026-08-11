@@ -244,7 +244,7 @@ export function SettingsView() {
                         <div className="p-8 bg-gradient-to-br from-white/5 to-transparent border border-white/10 rounded-[2rem] text-center space-y-4">
                             <h2 className="text-2xl font-black text-white tracking-tight">ZENMIUS CORE</h2>
                             <div className="space-y-1">
-                                <p className="font-mono text-xs" style={{ color: activeTheme.primary }}>v1.2.6-stable (2026)</p>
+                                <p className="font-mono text-xs" style={{ color: activeTheme.primary }}>v1.2.8-stable (2026)</p>
                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-600">
                                     Developed by <span style={{ color: activeTheme.primary }}>EPX-PANCA</span>
                                 </p>
