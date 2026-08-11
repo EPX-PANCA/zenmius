@@ -17,8 +17,10 @@ if (process.contextIsolated) {
         console.error(error)
     }
 } else {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore (define in dts)
     window.electron = electronAPI
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore (define in dts)
     window.api = api
 }

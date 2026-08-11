@@ -1,20 +1,23 @@
 {
   "name": "zenmius",
-  "version": "v1.2.6-stable",
+  "version": "v1.2.8-stable",
   "description": "Premium Open Source SSH & Remote Desktop Manager",
   "main": "./out/main/index.js",
   "author": "EPX-PANCA a.k.a zenpahlawan (Panca Putra Pahlawan)",
   "license": "MIT",
   "scripts": {
     "format": "prettier --write .",
-    "lint": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
+    "lint": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts",
+    "test": "node test-vault.js && node test-sftp.js",
+    "check:remote": "node scripts/check-remote-deps.js",
+    "setup:remote": "node scripts/check-remote-deps.js --install",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
-    "postinstall": "electron-builder install-app-deps",
+    "postinstall": "node scripts/check-remote-deps.js && electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "npm run build && electron-builder --mac",
@@ -27,7 +30,8 @@
       "output": "dist"
     },
     "files": [
-      "out/**/*"
+      "out/**/*",
+      "resources/**/*"
     ],
     "linux": {
       "target": [
@@ -48,6 +52,7 @@
     "@electron-toolkit/utils": "^3.0.0",
     "better-sqlite3": "^12.6.2",
     "framer-motion": "^11.0.3",
+    "graphify": "^1.0.0",
     "isomorphic-git": "^1.25.10",
     "libsodium-wrappers-sumo": "^0.8.1",
     "lucide-react": "^0.330.0",
@@ -76,6 +81,7 @@
     "eslint-plugin-react": "^7.33.2",
     "postcss": "^8.5.6",
     "prettier": "^3.2.5",
+    "sharp": "^0.35.0",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.3.3",
     "vite": "^5.0.12"

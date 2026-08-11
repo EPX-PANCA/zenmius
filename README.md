@@ -77,8 +77,9 @@ Zenmius is built on a robust, modern stack ensuring cross-platform compatibility
 ## 🚀 Getting Started
 
 ### Prerequisites
-- **Node.js** v18+
+- **Node.js** v22+
 - **NPM** or **Yarn**
+- Optional for Remote Desktop: FreeRDP and a VNC viewer
 
 ### Installation
 
@@ -92,18 +93,28 @@ Zenmius is built on a robust, modern stack ensuring cross-platform compatibility
    ```bash
    npm install
    ```
+   `npm install` checks for optional Remote Desktop clients and reports anything missing. It does not install OS packages automatically.
 
 3. **Start Development Mode**
    ```bash
    npm run dev
    ```
-   ```
    *This starts the Vite server and Electron app with Hot Module Replacement (HMR).*
 
-   > ⚠️ **IMPORTANT**: The default **Master Password** is `zendemo`.  
-   > Please change this immediately in **Settings > Security** after your first login to secure your vault.
+4. **Create or Unlock the Vault**
+   - Open the **Vault** tab after the first launch.
+   - On a new installation, choose a master password and confirm it with **Create Vault**.
+   - On later launches, use the same password with **Unlock Vault**.
+   - Zenmius has no shared default password. If you forget the master password, encrypted vault data cannot be recovered.
 
-4. **Build Distribution**
+5. **Optional Remote Desktop Dependencies**
+   ```bash
+   npm run check:remote
+   npm run setup:remote
+   ```
+   `check:remote` only reports missing FreeRDP/VNC clients. `setup:remote` asks for confirmation before using the operating system package manager.
+
+6. **Build Distribution**
    > **Note on Cross-Compilation**: Building for Windows/macOS from Linux (or vice-versa) may fail due to native dependencies like `better-sqlite3`.
    
    **Option A: Local Build (Current OS)**
