@@ -20,7 +20,7 @@ export interface Theme {
 
 export interface Notification {
     id: string
-    type: 'success' | 'error' | 'info'
+    type: 'success' | 'error' | 'info' | 'warning'
     message: string
 }
 
@@ -61,16 +61,21 @@ interface AppState {
     isInitialized: boolean
     activeTheme: Theme
     isAddHostModalOpen: boolean
+    sidebarTab: string
+    vaultEditHostId: string | null
     notifications: Notification[]
     settings: Settings
     loadData: () => Promise<void>
     addHost: (host: Host) => Promise<void>
     removeHost: (id: string) => Promise<void>
+    cloneHost: (id: string) => Promise<void>
     setVaultLocked: (locked: boolean) => void
     setInitialized: (val: boolean) => void
     setTheme: (theme: Theme) => void
     setAddHostModalOpen: (open: boolean) => void
-    notify: (type: 'success' | 'error' | 'info', message: string) => void
+    setSidebarTab: (id: string) => void
+    setVaultEditHostId: (id: string | null) => void
+    notify: (type: 'success' | 'error' | 'info' | 'warning', message: string) => void
     addLog: (entry: Omit<LogEntry, 'id' | 'timestamp'>) => void // New
     receiveLog: (log: LogEntry) => void // New
     removeNotification: (id: string) => void
@@ -108,6 +113,8 @@ export const useStore = create<AppState>((set, get) => ({
     isInitialized: false,
     activeTheme: defaultThemes[0],
     isAddHostModalOpen: false,
+    sidebarTab: 'dashboard',
+    vaultEditHostId: null,
     notifications: [],
     settings: initialSettings,
 
@@ -188,6 +195,17 @@ export const useStore = create<AppState>((set, get) => ({
         set((state) => ({ hosts: state.hosts.filter(h => h.id !== id) }))
         try {
             await window.electron.ipcRenderer.invoke('db:remove-host', id)
+            
+            // Delete associated vault credential if vault is unlocked
+            if (!get().vaultLocked) {
+                const vaultRes = await window.electron.ipcRenderer.invoke('vault:delete-credential', id)
+                if (!vaultRes.success) {
+                    console.warn('Failed to delete vault credential for host', id, vaultRes.error)
+                }
+            } else {
+                get().notify('info', 'Host deleted. Vault is locked so any saved credentials were not removed.')
+            }
+
             get().addLog({
                 type: 'info',
                 module: 'Host Manager',
@@ -205,6 +223,44 @@ export const useStore = create<AppState>((set, get) => ({
                 message: `Failed to remove host ${hostName}`,
                 details: error.message
             })
+        }
+    },
+
+    cloneHost: async (id) => {
+        const hostToClone = get().hosts.find(h => h.id === id)
+        if (!hostToClone) return
+
+        let baseName = hostToClone.name
+        const copyMatch = baseName.match(/ \(Copy\)( \d+)?$/)
+        if (copyMatch) {
+            baseName = baseName.substring(0, copyMatch.index)
+        }
+        
+        let newName = `${baseName} (Copy)`
+        let counter = 1
+        while (get().hosts.some(h => h.name === newName)) {
+            counter++
+            newName = `${baseName} (Copy) ${counter}`
+        }
+
+        const newId = Math.random().toString(36).substring(7)
+        const clonedHost = {
+            ...hostToClone,
+            id: newId,
+            name: newName
+        }
+
+        await get().addHost(clonedHost)
+
+        if (!get().vaultLocked) {
+            const vaultRes = await window.electron.ipcRenderer.invoke('vault:clone-credential', { oldId: id, newId: newId })
+            if (!vaultRes.success && vaultRes.error !== 'Credential not found') {
+                console.warn('Failed to clone vault credential', vaultRes.error)
+            } else if (vaultRes.success) {
+                get().notify('success', 'Host and its credentials cloned successfully')
+            }
+        } else {
+            get().notify('info', 'Host cloned. Vault is locked, so credentials were NOT cloned.')
         }
     },
 
@@ -230,6 +286,8 @@ export const useStore = create<AppState>((set, get) => ({
         get().updateSettings({ activeThemeName: theme.name })
     },
     setAddHostModalOpen: (open) => set({ isAddHostModalOpen: open }),
+    setSidebarTab: (id) => set({ sidebarTab: id }),
+    setVaultEditHostId: (id) => set({ vaultEditHostId: id }),
 
     notify: (type, message) => {
         const id = Math.random().toString(36).substring(7)
